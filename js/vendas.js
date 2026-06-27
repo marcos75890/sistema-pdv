@@ -127,6 +127,19 @@ App.registerModule('vendas', {
     return { subtotal, total, lucro: total - custo, custo };
   },
 
+  /* helpers de data p/ vencimento do fiado — retornam 'YYYY-MM-DD' (local) */
+  _toYMD(d) {
+    const off = d.getTimezoneOffset() * 60000;
+    return new Date(d.getTime() - off).toISOString().slice(0, 10);
+  },
+  _addDays(n) { const d = new Date(); d.setDate(d.getDate() + n); return this._toYMD(d); },
+  _addMonths(n) {
+    const d = new Date(); const dia = d.getDate();
+    d.setMonth(d.getMonth() + n);
+    if (d.getDate() < dia) d.setDate(0); // ajusta meses mais curtos (ex.: 31 -> último dia)
+    return this._toYMD(d);
+  },
+
   _renderCart() {
     const wrap = document.getElementById('cartItems'); const foot = document.getElementById('cartFoot');
     if (!wrap) return;
@@ -251,8 +264,31 @@ App.registerModule('vendas', {
             extra.innerHTML = `<label class="form-label">Parcelas</label>
               <select class="form-select" id="parcelas">${[1, 2, 3, 4, 5, 6, 10, 12].map((n) => `<option value="${n}">${n}x de ${App.fmt.money(t.total / n)}</option>`).join('')}</select>`;
           } else if (this._pgMetodo === 'fiado') {
-            extra.innerHTML = cli ? `<div class="badge-soft b-orange w-100 justify-content-center" style="padding:10px"><i class="bi bi-info-circle"></i> Será lançado em <b>Contas a Receber</b> de ${App.escape(cli.nome)}.</div>`
-              : `<div class="badge-soft b-red w-100 justify-content-center" style="padding:10px"><i class="bi bi-exclamation-triangle"></i> Selecione um cliente para vender fiado.</div>`;
+            if (!cli) {
+              extra.innerHTML = `<div class="badge-soft b-red w-100 justify-content-center" style="padding:10px"><i class="bi bi-exclamation-triangle"></i> Selecione um cliente para vender fiado.</div>`;
+            } else {
+              this._fiadoVenc = this._addMonths(1);
+              extra.innerHTML = `
+                <div class="badge-soft b-orange w-100 justify-content-center mb-3" style="padding:10px"><i class="bi bi-info-circle"></i> Será lançado em <b>Contas a Receber</b> de ${App.escape(cli.nome)}.</div>
+                <label class="form-label">Vencimento (quando o cliente vai pagar)</label>
+                <input type="date" class="form-control form-control-lg" id="fiadoVenc" value="${this._fiadoVenc}">
+                <div class="chips mt-2" id="fiadoAtalhos">
+                  <button type="button" class="chip active" data-venc="m1"><i class="bi bi-calendar-event me-1"></i>Próximo mês</button>
+                  <button type="button" class="chip" data-venc="d15">+15 dias</button>
+                  <button type="button" class="chip" data-venc="d30">+30 dias</button>
+                </div>`;
+              const inp = c.querySelector('#fiadoVenc');
+              inp.oninput = () => {
+                this._fiadoVenc = inp.value;
+                c.querySelectorAll('#fiadoAtalhos .chip').forEach((x) => x.classList.remove('active'));
+              };
+              c.querySelectorAll('#fiadoAtalhos .chip').forEach((b) => b.onclick = () => {
+                const v = b.dataset.venc;
+                this._fiadoVenc = v === 'm1' ? this._addMonths(1) : this._addDays(v === 'd15' ? 15 : 30);
+                inp.value = this._fiadoVenc;
+                c.querySelectorAll('#fiadoAtalhos .chip').forEach((x) => x.classList.toggle('active', x === b));
+              });
+            }
           } else extra.innerHTML = '';
         };
         c.querySelectorAll('.pay-opt').forEach((o) => o.onclick = () => {
@@ -273,8 +309,10 @@ App.registerModule('vendas', {
     const maxNum = vendas.reduce((mx, v) => Math.max(mx, parseInt(v.numero) || 0), 1000);
     const numero = String(maxNum + 1);
     const tipo = this._pgMetodo;
+    const vencISO = (tipo === 'fiado' && this._fiadoVenc) ? new Date(this._fiadoVenc + 'T12:00:00').toISOString() : null;
     const venda = {
       numero, data: new Date().toISOString(),
+      vencimento: vencISO,
       itens: this.cart.map((i) => ({ produtoId: i.produtoId, nome: i.nome, qtd: i.qtd, preco: i.preco, subtotal: i.preco * i.qtd })),
       qtdItens: this.cart.reduce((s, i) => s + i.qtd, 0),
       subtotal: t.subtotal, desconto: this.desconto, acrescimo: this.acrescimo, entrega: 0,
@@ -299,7 +337,7 @@ App.registerModule('vendas', {
       await Store.create('contasReceber', {
         descricao: `Venda ${numero} - ${cli.nome}`, clienteId: cli.id, clienteNome: cli.nome, vendaId: saved.id,
         categoria: 'Vendas a prazo (fiado)', valor: t.total, valorRecebido: 0,
-        emissao: venda.data, vencimento: venda.data, status: 'pendente', parcela: '1/1'
+        emissao: venda.data, vencimento: vencISO || venda.data, status: 'pendente', parcela: '1/1'
       });
     } else {
       await Store.create('movCaixa', { data: venda.data, tipo: 'entrada', categoria: 'Venda', descricao: 'Venda ' + numero, valor: t.total, origem: 'venda', refId: saved.id, formaPagamento: tipo });
@@ -348,6 +386,7 @@ App.registerModule('vendas', {
       ${v.acrescimo ? `<div class="r-row"><span>Acréscimo</span><span>+${App.fmt.money(v.acrescimo)}</span></div>` : ''}
       <div class="r-row" style="font-weight:bold;font-size:15px"><span>TOTAL</span><span>${App.fmt.money(v.total)}</span></div>
       <div class="r-row"><span>Pagamento</span><span>${(v.pagamentos || []).map((p) => p.tipo).join(', ')}</span></div>
+      ${v.vencimento && (v.pagamentos || []).some((p) => p.tipo === 'fiado') ? `<div class="r-row"><span>Vencimento (fiado)</span><span>${App.fmt.date ? App.fmt.date(v.vencimento) : App.fmt.datetime(v.vencimento)}</span></div>` : ''}
       <hr>
       <div style="text-align:center;font-size:11px">Obrigado pela preferência! 💙</div>
     </div>`;

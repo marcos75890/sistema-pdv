@@ -158,4 +158,27 @@
   <script src="js/configuracoes.js"></script>
 
   <!-- inicialização -->
-  <script>document.addEventListener('DOMContentLoaded', () => Ap
+  <script>
+    (function () {
+      function start() {
+        try {
+          App.boot();
+        } catch (err) {
+          console.error('Falha ao iniciar o app:', err);
+          document.body.innerHTML =
+            '<div style="max-width:480px;margin:80px auto;font-family:Inter,system-ui,sans-serif;text-align:center;color:#334155">' +
+            '<h2 style="margin-bottom:8px">Não foi possível carregar o sistema</h2>' +
+            '<p style="color:#64748b">Tente recarregar a página. Se o problema continuar, limpe o cache do navegador.</p>' +
+            '<button onclick="location.reload()" style="margin-top:16px;padding:10px 18px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-weight:600;cursor:pointer">Recarregar</button>' +
+            '</div>';
+        }
+      }
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', start);
+      } else {
+        start();
+      }
+    })();
+  </script>
+</body>
+</html>
