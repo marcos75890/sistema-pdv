@@ -133,10 +133,10 @@ App.registerModule('vendas', {
     return new Date(d.getTime() - off).toISOString().slice(0, 10);
   },
   _addDays(n) { const d = new Date(); d.setDate(d.getDate() + n); return this._toYMD(d); },
-  _addMonths(n) {
-    const d = new Date(); const dia = d.getDate();
-    d.setMonth(d.getMonth() + n);
-    if (d.getDate() < dia) d.setDate(0); // ajusta meses mais curtos (ex.: 31 -> último dia)
+  // dia 1º do próximo mês (dia do pagamento do salário) — padrão do fiado
+  _dia1ProximoMes() {
+    const d = new Date();
+    d.setMonth(d.getMonth() + 1, 1); // avança 1 mês e fixa o dia 1
     return this._toYMD(d);
   },
 
@@ -320,13 +320,13 @@ App.registerModule('vendas', {
                 <button class="btn btn-primary w-100" id="fiadoPickCli"><i class="bi bi-person-plus me-1"></i>Selecionar ou criar cliente</button>`;
               c.querySelector('#fiadoPickCli').onclick = () => this._pickCliente(() => this._finalizar('fiado'));
             } else {
-              this._fiadoVenc = this._addMonths(1);
+              this._fiadoVenc = this._dia1ProximoMes();
               extra.innerHTML = `
                 <div class="badge-soft b-orange w-100 justify-content-center mb-3" style="padding:10px"><i class="bi bi-info-circle"></i> Será lançado em <b>Contas a Receber</b> de ${App.escape(cli.nome)}.</div>
                 <label class="form-label">Vencimento (quando o cliente vai pagar)</label>
                 <input type="date" class="form-control form-control-lg" id="fiadoVenc" value="${this._fiadoVenc}">
                 <div class="chips mt-2" id="fiadoAtalhos">
-                  <button type="button" class="chip active" data-venc="m1"><i class="bi bi-calendar-event me-1"></i>Próximo mês</button>
+                  <button type="button" class="chip active" data-venc="m1"><i class="bi bi-calendar-event me-1"></i>Dia 1º (próximo salário)</button>
                   <button type="button" class="chip" data-venc="d15">+15 dias</button>
                   <button type="button" class="chip" data-venc="d30">+30 dias</button>
                 </div>`;
@@ -337,7 +337,7 @@ App.registerModule('vendas', {
               };
               c.querySelectorAll('#fiadoAtalhos .chip').forEach((b) => b.onclick = () => {
                 const v = b.dataset.venc;
-                this._fiadoVenc = v === 'm1' ? this._addMonths(1) : this._addDays(v === 'd15' ? 15 : 30);
+                this._fiadoVenc = v === 'm1' ? this._dia1ProximoMes() : this._addDays(v === 'd15' ? 15 : 30);
                 inp.value = this._fiadoVenc;
                 c.querySelectorAll('#fiadoAtalhos .chip').forEach((x) => x.classList.toggle('active', x === b));
               });
