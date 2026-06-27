@@ -185,9 +185,16 @@ App.registerModule('vendas', {
     if (grand) grand.textContent = App.fmt.money(t.total);
   },
 
-  /* ---- seleção de cliente ---- */
-  _pickCliente() {
-    const body = `<input type="text" class="form-control mb-2" id="cliSearch" placeholder="Buscar cliente…" autofocus>
+  /* ---- seleção de cliente ----
+     onPicked: callback opcional chamado após escolher/criar um cliente.
+     Quando informado, é responsável pelo próximo passo de UI (ex.: reabrir o
+     pagamento). Sem callback, fecha o modal e atualiza o carrinho. */
+  _pickCliente(onPicked) {
+    const body = `
+      <div class="d-flex gap-2 mb-2">
+        <input type="text" class="form-control" id="cliSearch" placeholder="Buscar cliente…" autofocus>
+        <button class="btn btn-primary" id="cliNovo" style="white-space:nowrap"><i class="bi bi-person-plus me-1"></i>Novo</button>
+      </div>
       <div id="cliList" style="max-height:340px;overflow:auto"></div>`;
     App.modal({
       title: 'Selecionar cliente', body, footer: `<button class="btn btn-ghost" data-bs-dismiss="modal">Fechar</button>`,
@@ -202,11 +209,53 @@ App.registerModule('vendas', {
               <div class="rank-meta"><strong>${App.escape(x.nome)} ${x.bloqueado ? '<span class="badge-soft b-red" style="font-size:9px">BLOQUEADO</span>' : ''}</strong>
               <small>${App.fmt.money(x.totalComprado || 0)} · ${x.qtdCompras || 0} compras</small></div></div>`).join('');
           c.querySelectorAll('[data-pick]').forEach((it) => it.onclick = () => {
-            this.clienteId = it.dataset.pick || null; m.hide(); this._renderCart();
+            this.clienteId = it.dataset.pick || null; this._afterPick(m, onPicked);
           });
         };
         c.querySelector('#cliSearch').oninput = (e) => render(e.target.value);
+        c.querySelector('#cliNovo').onclick = () => this._novoClienteRapido(onPicked);
         render('');
+      }
+    });
+  },
+
+  _afterPick(m, onPicked) {
+    if (onPicked) { onPicked(); } else { m.hide(); this._renderCart(); }
+  },
+
+  /* ---- cadastro rápido de cliente direto na venda ---- */
+  _novoClienteRapido(onPicked) {
+    const body = `<form id="cliQF"><div class="row g-3">
+      <div class="col-md-8"><label class="form-label">Nome *</label><input class="form-control" name="nome" autofocus required></div>
+      <div class="col-md-4"><label class="form-label">CPF / CNPJ</label><input class="form-control" name="doc"></div>
+      <div class="col-md-6"><label class="form-label">Telefone</label><input class="form-control" name="telefone"></div>
+      <div class="col-md-6"><label class="form-label">WhatsApp</label><input class="form-control" name="whatsapp"></div>
+      <div class="col-12"><label class="form-label">Observações</label><textarea class="form-control" name="obs" rows="2"></textarea></div>
+    </div></form>`;
+    App.modal({
+      title: 'Novo cliente', size: 'lg', body,
+      footer: `<button class="btn btn-ghost" id="qfVoltar"><i class="bi bi-arrow-left me-1"></i>Voltar</button>
+               <button class="btn btn-primary" id="qfSave"><i class="bi bi-check2 me-1"></i>Salvar e selecionar</button>`,
+      onShown: (c, m) => {
+        const f = c.querySelector('#cliQF');
+        c.querySelector('#qfVoltar').onclick = () => this._pickCliente(onPicked);
+        const salvar = async () => {
+          const nome = f.nome.value.trim();
+          if (!nome) { App.toast('Informe o nome do cliente.', 'warning'); f.nome.focus(); return; }
+          const tel = f.telefone.value.trim();
+          const novo = await Store.create('clientes', {
+            nome, doc: f.doc.value.trim(), telefone: tel,
+            whatsapp: (f.whatsapp.value.trim() || tel), email: '',
+            endereco: '', complemento: '', cidade: '', estado: '', cep: '', obs: f.obs.value.trim(),
+            bloqueado: false, totalComprado: 0, qtdCompras: 0, ultimaCompra: null, criadoEm: new Date().toISOString()
+          });
+          this._clientes.push(novo);
+          this.clienteId = novo.id;
+          App.toast('Cliente "' + novo.nome + '" criado e selecionado.', 'success');
+          this._afterPick(m, onPicked);
+        };
+        c.querySelector('#qfSave').onclick = salvar;
+        f.addEventListener('submit', (e) => { e.preventDefault(); salvar(); });
       }
     });
   },
@@ -218,23 +267,24 @@ App.registerModule('vendas', {
   },
 
   /* ---- finalização / pagamento ---- */
-  _finalizar() {
+  _finalizar(preMetodo) {
     const t = this._totais();
     const cli = this.clienteId ? this._clientes.find((c) => c.id === this.clienteId) : null;
     if (cli && cli.bloqueado) {
       App.confirm({ title: 'Cliente bloqueado', message: `<b>${App.escape(cli.nome)}</b> está marcado como <b>NÃO VENDER / NÃO PAGA</b>. Deseja continuar mesmo assim?`, danger: true, confirm: 'Vender assim mesmo' })
-        .then((ok) => { if (ok) this._pagamentoModal(t, cli); });
+        .then((ok) => { if (ok) this._pagamentoModal(t, cli, preMetodo); });
       return;
     }
-    this._pagamentoModal(t, cli);
+    this._pagamentoModal(t, cli, preMetodo);
   },
 
-  _pagamentoModal(t, cli) {
+  _pagamentoModal(t, cli, preMetodo) {
     const metodos = [
       ['dinheiro', 'Dinheiro', 'bi-cash'], ['pix', 'PIX', 'bi-qr-code'], ['credito', 'Crédito', 'bi-credit-card'],
       ['debito', 'Débito', 'bi-credit-card-2-front'], ['fiado', 'Fiado', 'bi-journal-text']
     ];
-    this._pgMetodo = 'dinheiro';
+    const metodoInicial = metodos.some((m) => m[0] === preMetodo) ? preMetodo : 'dinheiro';
+    this._pgMetodo = metodoInicial;
     const body = `
       <div class="text-center mb-3">
         <div class="text-muted-2" style="font-size:13px">Total a pagar</div>
@@ -243,7 +293,7 @@ App.registerModule('vendas', {
       </div>
       <label class="form-label">Forma de pagamento</label>
       <div class="pay-grid mb-3" id="payGrid">
-        ${metodos.map((m, i) => `<div class="pay-opt ${i === 0 ? 'active' : ''}" data-m="${m[0]}"><i class="bi ${m[2]}"></i>${m[1]}</div>`).join('')}
+        ${metodos.map((m) => `<div class="pay-opt ${m[0] === metodoInicial ? 'active' : ''}" data-m="${m[0]}"><i class="bi ${m[2]}"></i>${m[1]}</div>`).join('')}
       </div>
       <div id="payExtra"></div>`;
     App.modal({
@@ -265,7 +315,10 @@ App.registerModule('vendas', {
               <select class="form-select" id="parcelas">${[1, 2, 3, 4, 5, 6, 10, 12].map((n) => `<option value="${n}">${n}x de ${App.fmt.money(t.total / n)}</option>`).join('')}</select>`;
           } else if (this._pgMetodo === 'fiado') {
             if (!cli) {
-              extra.innerHTML = `<div class="badge-soft b-red w-100 justify-content-center" style="padding:10px"><i class="bi bi-exclamation-triangle"></i> Selecione um cliente para vender fiado.</div>`;
+              extra.innerHTML = `
+                <div class="badge-soft b-red w-100 justify-content-center mb-2" style="padding:10px"><i class="bi bi-exclamation-triangle"></i> A venda fiado precisa de um cliente.</div>
+                <button class="btn btn-primary w-100" id="fiadoPickCli"><i class="bi bi-person-plus me-1"></i>Selecionar ou criar cliente</button>`;
+              c.querySelector('#fiadoPickCli').onclick = () => this._pickCliente(() => this._finalizar('fiado'));
             } else {
               this._fiadoVenc = this._addMonths(1);
               extra.innerHTML = `
