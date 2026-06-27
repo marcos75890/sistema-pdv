@@ -48,9 +48,9 @@ window.App = (function () {
         const email = document.getElementById('loginUser').value.trim().toLowerCase();
         const pass = document.getElementById('loginPass').value;
         const users = await Store.list('usuarios');
-        const u = users.find((x) => (x.email || '').toLowerCase() === email && String(x.senha) === pass);
-        if (u || (email === 'admin@empresa.com' && pass === 'admin')) {
-          this.user = u || { nome: 'Administrador', papel: 'Administrador', email };
+        const u = users.find((x) => ((x.email || '').toLowerCase() === email || (x.nome || '').toLowerCase() === email) && String(x.senha) === pass);
+        if (u) {
+          this.user = u;
           sessionSet(this.user);
           this._enterApp();
           this.toast('Bem-vindo, ' + this.user.nome + '!', 'success');

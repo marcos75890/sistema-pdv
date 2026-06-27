@@ -6519,20 +6519,20 @@ window.__SEED_DATA__ = {
   "movEstoque": [],
   "usuarios": [
     {
-      "id": "user_admin",
-      "nome": "Administrador",
-      "email": "admin@empresa.com",
+      "id": "user_marcos",
+      "nome": "Marcos Dias",
+      "email": "marcos.dias",
       "papel": "Administrador",
       "ativo": true,
-      "senha": "admin"
+      "senha": "Lider@2413"
     },
     {
       "id": "user_laryssa",
-      "nome": "Laryssa Alencar",
-      "email": "laryssa@empresa.com",
-      "papel": "Vendedor",
+      "nome": "Laryssa",
+      "email": "laryssa",
+      "papel": "Administrador",
       "ativo": true,
-      "senha": "1234"
+      "senha": "Lider@2413"
     }
   ]
 };
